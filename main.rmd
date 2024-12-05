@@ -1,0 +1,1034 @@
+---
+title: "BTL_XSTK"
+author: "Group_8"
+date: "2024-10-07"
+output:
+  html_document: default
+  word_document: default
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r echo=FALSE}
+#Khai báo thư viện 
+library(questionr) 
+library(knitr)
+library(ggplot2)
+library(base)
+library(GGally)
+library(corrplot)
+library(gridExtra)
+library(grid) 
+```
+
+<font size="4">**1.TIỀN XỬ LÝ SỐ LIỆU**</frontfront>
+
+1.1 Đọc dữ liệu (Import data):
+
+Đầu tiên, chúng ta đọc dữ liệu từ tệp tin All_GPUs.csv và in hiển thị
+một vài dòng đầu tiên. Việc này giúp chúng ta có cái nhìn tổng quan về
+dữ liệu, hiểu cấu trúc, định hướng trước khi đi sâu vào phân tích dữ
+liệu. Quá trình này được mô tả trong hình dưới đây:
+
+```{r}
+All_GPUs <- read.csv("All_GPUs.csv")
+head(All_GPUs, 6)
+```
+
+1.2. Kiểm tra và xử lý dữ liệu khuyết trong tập dữ liệu:
+
+Ta sẽ thực hiện thống kê số lượng và tỷ lệ dữ liệu khuyết ở các biến, từ
+đó xử lý lựa chọn ra các biến chính để phân tích. Tuy nhiên, ta nhận
+thấy rằng các giá trị khuyết không cùng loại. Nó có thể là giá trị trống
+(hay rỗng) , gạch ngang "-" ,.. gây khó khăn cho việc thống kê dữ liệu
+khuyết . Vì thế, để thuận tiện ta chuyển đổi tất cả chúng thành giá trị
+NA. <br> Đầu tiên, tìm các dòng trống (hàng có toàn bộ các giá trị là
+rỗng hoặc "") trong dữ liệu và chuyển chúng thành giá trị NA:
+
+```{r}
+# Thay thế tất cả các ô trống trong dữ liệu All_GPUs bằng NA
+All_GPUs[All_GPUs == ""] <- NA
+```
+
+Tiếp đó, tìm các giá trị trong dataframe có định dạng -(các giá trị bắt
+đầu bằng ký tự xuống dòng theo sau là dấu - ) và chuyển chúng thành NA.
+Ta sử dụnglệnh gsub() để thay thế “-” bằng NA trong toàn bộ dataframe.
+
+```{r}
+# Thay thế các giá trị có định dạng "\n-" bằng NA trong tất cả các cột của All_GPUs 
+All_GPUs[] <- lapply(All_GPUs, function(x) gsub("^\\n- $", NA, x))
+```
+
+Cuối cùng là thay thế các chuỗi "NA" (N/A) thành NA.
+
+```{r}
+All_GPUs[All_GPUs == "NA"] <- NA
+```
+
+Bây giờ các dữ liệu khuyết đã đồng nhất, ta tiến hành thống kê số lượng
+và tỷ lệ dữ liệu khuyết ở các biến bằng hàm **freq.na()** trong thư viện
+**questionr**.
+
+```{r}
+# Sử dụng hàm freq.na() để tìm tần suất NA trong dữ liệu 
+na_summary <- freq.na(All_GPUs) 
+# Chuyển kết quả thành một data frame 
+na_summary_df <- as.data.frame(na_summary) 
+colnames(na_summary_df) <- c("NA_Count", "NA_Percentage")
+kable(na_summary_df, format = "markdown", caption = "Số lượng và tỉ lệ dữ liệu khuyết ở các biến")
+```
+
+Dựa trên kết quả thu được ở trên, ta nhận thấy có nhiều biến chứa dữ
+liệu khuyết, để dễ dàng hơn, ta thực hiện vẽ đồ thị thể hiện tỷ lệ dữ
+liệu khuyết ở từng biến bằng cách sử dụng hàm **ggplot2**. Ta thu được
+đồ thị như hình dưới đây.
+
+```{r echo=FALSE}
+ggplot(na_summary_df, aes(x = rownames(na_summary_df) , y = NA_Percentage)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+ geom_text(aes(label = paste0(round(NA_Percentage, 1), "%")), vjust = -0.5, size = 2) +
+ labs(title = "Tỷ lệ dữ liệu khuyết ở các biến", 
+       x = "Biến", 
+       y = "Tỷ lệ dữ liệu khuyết (%)") +
+ theme_minimal() + theme(axis.text.x = element_text(size = 10, angle = 90, hjust = 1))
+```
+
+Với các biến có tỷ lệ dữ liệu khuyết lơn hơn 15% ta sẽ xóa đi để giảm
+nhiễu cho quá trình phân tích. Và đồng thời với các biến có tỷ lệ dữ
+liệu khuyết dưới 15%, ta sẽ xóa đi các quan sát chứa dữ liệu khuyết, với
+3406 quan sát việc này vẫn đảm báo không làm mất đi tính chính xác và
+tầm quan trọng của biến.
+
+```{r}
+# Giữ lại các biến có tỷ lệ dữ liệu khuyết dưới 15%
+selected_cols <- rownames(na_summary_df)[na_summary_df$NA_Percentage < 15]
+
+# Giữ lại các biến thỏa mãn điều kiện trong dataframe ban đầu
+new_All_GPUs <- All_GPUs[, selected_cols]
+
+#Xoá các quan sát chứa dữ liệu khuyết
+new_All_GPUs<-na.omit(new_All_GPUs)
+```
+
+1.3. Lựa chọn biến:<br> Sau khi đã loại bỏ đi các biến có tỷ lệ khuyết
+cao, ta sẽ chọn lọc các biến quan trọng. Qua tìm hiểu, nhóm nhận thấy
+biến **Memory_Speed** là một nhân tố quan trọng ảnh hướng đến hiệu suất
+của GPU. Tốc độ xung nhịp bộ nhớ là một yếu tố thiết yếu trong hiệu suất
+của GPU, đặc biệt đối với các tác vụ yêu cầu GPU truy cập nhiều dữ liệu.
+Tốc độ xung nhịp bộ nhớ cao hơn có nghĩa là GPU có thể truy cập bộ nhớ
+nhanh hơn, dẫn đến tăng hiệu suất. <br> **Memory_Speed** không chỉ là về
+tốc độ xung nhịp, nó có liên quan và chịu ảnh hưởng trực tiếp bởi
+**Memory_Bandwidth**.<br> Và các nhân tố khác có ảnh hưởng với mức độ
+khác nhau đến **Memory_Speed** bao gồm:
+"Memory_Type","Memory_Bus","L2_Cache","Architecture","Process","Memory","Dedicated".
+<br> Ta có thể lấy thêm biến "Manufacturer"để so sánh và nhận xét về
+**Memory_Speed** của các GPU ở các nhà sản xuất khác nhau.<br>
+
+Đây là một số nguồn tài liệu và cơ sở ta có thể tham khảo để tìm hiểu về
+các biến có ảnh hưởng đến ***Memory_Speed*** trong GPU.
+
+Link:
+<https://vibox.co.uk/blog/gpu-memory-clock-speed-vs-gpu-core-clock-speed>
+<br> Link:
+<https://www.hp.com/us-en/shop/tech-takes/does-ram-speed-matter>
+
+1.4. Làm sạch dữ liệu:<br> 1.4.1 Xử lý đơn vị Để thuận tiện hơn cho quá
+trình phân tích, ta sẽ bỏ đi đơn vị của các biến như "L2_Cache",
+"Memory","Memory_Bandwidth","Memory_Bus", "Memory_speed", "Process".
+Việc này giúp đồng nhất dữ liệu, hợp lý hóa phân tích về sau giúp việc
+so sánh và diễn giải dữ liệu trên các biến trở nên đơn giản hơn.
+
+```{r}
+# Lựa chọn các biến cần xoá đơn vị
+columns_to_clean <- c("L2_Cache","Memory","Memory_Bandwidth","Memory_Bus","Memory_Speed","Process")
+
+#Tạo hàm thực hiện xoá đơn vị ở các biến 
+remove_units <- function(column) {
+  # Sử dụng gsub để xóa tất cả các ký tự không phải số (kể cả đơn vị)
+  cleaned_column <- gsub("[^0-9.]", "", column)
+  # Chuyển đổi kết quả về kiểu numeric
+  cleaned_column <- as.numeric(cleaned_column)
+  
+  return(cleaned_column)
+}
+
+# Áp dụng hàm cho các biến đã chọn
+new_All_GPUs[columns_to_clean] <- lapply(new_All_GPUs[columns_to_clean], remove_units)
+```
+
+1.4.2 Số hóa biến phân loại
+
+Và với các biến định tính dùng để phân loại như " Architecture",
+"Dedicated", "Manufacturer" , "Memory_Type". Ta đi tiến hành số hóa bởi
+chúng là các biến dạng chuỗi, sẽ gây khó khăn cho quá trình phân tích
+hoặc khi xây dựng mô hình hồi quy. Ta sẽ dùng hàm factor() để chuyển đổi
+các cột dữ liệu thành phần tử, sau đó sử dụng hàm as.numeric() để chuyển
+đổi phần tử thành dữ liệu số. Kết quả sau khi thực hiện như hình dưới:
+
+```{r echo=FALSE}
+# Chuyển đổi các cột ký tự hoặc phân loại thành factor 
+#cols_to_factor <- c("Architecture", "Dedicated", "Manufacturer", "Memory_Type") 
+
+# Áp dụng hàm factor() cho các cột đã chọn 
+#new_All_GPUs[cols_to_factor] <- lapply(new_All_GPUs[cols_to_factor], factor) 
+
+# Chuyển đổi các cột factor thành numeric 
+#new_All_GPUs[cols_to_factor] <- lapply(new_All_GPUs[cols_to_factor], function(x) as.numeric(x)) 
+
+# Kiểm tra lại data frame sau khi chuyển đổi 
+#print(head(new_All_GPUs[cols_to_factor], 10)) 
+
+```
+
+Cuối cùng, kiểm tra lại số lượng giá trị bị khuyết để xác nhận rằng đây
+thực sự là tập dữ liệu cuối cùng sau khi làm sạch. Như minh họa trong
+hình dưới , không còn dữ liệu khuyết trong tập dữ liệu cuối cùng. Như
+vậy quá trình làm sạch dữ liệu đã thành công.
+
+```{r echo=FALSE}
+freq.na(new_All_GPUs)
+```
+
+Kết quả của quá trình tiền xử lý số liệu, ta thu được bộ dữ liệu mới gồm
+các biến chính sẵn sàng cho quá trình phân tích phía sau. Bộ dữ liệu mới
+được mô tả một số dòng như hình dưới đây:
+
+```{r}
+GPU_data<-new_All_GPUs[c("Memory_Speed","Memory","Memory_Bandwidth","Memory_Type","Memory_Bus","L2_Cache","Architecture","Process","Dedicated","Manufacturer")]
+head(GPU_data)
+```
+
+<font size="4">**2.THỐNG KÊ MÔ TẢ**</frontfront>
+
+**2.1. Tóm tắt dữ liệu đã được làm sạch**
+
+Để thực hiện tính các thống kê mô tả cho các biến định lượng, nhóm báo
+cáo sử dụng các hàm có sẵn trong R để tính trung bình, độ lệch chuẩn
+mẫu, các phân vị, trung vị, giá trị lớn nhất và giá trị nhỏ nhất. Sử
+dụng tập dữ liệu GPU_data để tính thống kê cho từng cột định lượng. Cách
+thực hiện như dưới đây:
+
+```{r}
+# Xác định các biến số và tạo một khung dữ liệu chỉ chứa các biến số
+new_numeric_vars <- sapply(GPU_data, is.numeric)
+numeric_data <- GPU_data[, new_numeric_vars]
+
+# Tính toán các thống kê mô tả cho các biến số
+summary_stats <- sapply(numeric_data, function(x) {
+  c(
+    Mean = mean(x),                   # Trung bình
+    SD = sd(x),                       # Độ lệch chuẩn
+    Min = min(x),                     # Giá trị nhỏ nhất
+    Q1 = quantile(x, 0.25),           # Phân vị 25%
+    Median = median(x),               # Trung vị
+    Q3 = quantile(x, 0.75),           # Phân vị 75%
+    Max = max(x)                      # Giá trị lớn nhất
+  )
+})
+
+# Chuyển thống kê mô tả thành dataframe và xuất ra dưới dạng bảng
+t(as.data.frame(summary_stats))
+```
+
+Đối với các biến định tính, nhóm lập bảng thống kê số lượng cho các phân
+loại.
+
+```{r}
+# Thống kê số lượng cho biến Memory_Type
+table(GPU_data$Memory_Type)
+```
+
+```{r}
+# Thống kê số lượng cho biến Dedicated
+table(GPU_data$Dedicated)
+```
+
+```{r}
+# Thống kê số lượng cho biến Manufacturer
+table(GPU_data$Manufacturer)
+```
+
+**2.2. Vẽ đồ thị histogram cho biến Memory_Speed bằng đồ thị ggplot**
+
+```{r}
+# Vẽ histogram cho biến Memory_Speed với binwidth tùy chỉnh
+ggplot(GPU_data, aes(x = Memory_Speed)) +
+  geom_histogram(binwidth = 50, fill = "steelblue", color = "black", alpha = 0.7) + 
+  labs(x = "Memory Speed (MHz)",  # Ghi chú đơn vị nếu cần
+       y = "Số Lượng",
+       caption = paste("Hình 1 - Biểu đồ histogram cho Memory Speed")) +
+  theme_minimal()+
+      theme(
+        plot.caption = element_text(hjust = 0.5, face = "italic", color = "darkred")
+      )
+```
+
+**Nhóm rút ra được một số nhận xét về đồ thị histogram "Phân Phối Memory
+Speed"**: Đồ thị histogram thể hiện phân phối Memory Speed của các GPU
+trong tập dữ liệu. Phần lớn các giá trị tập trung trong khoảng từ 800
+MHz đến 1600 MHz, cho thấy các GPU phổ biến thường hoạt động trong phạm
+vi tốc độ này. Đặc biệt, các bins xung quanh 1500 MHz có tần suất xuất
+hiện cao nhất, có thể phản ánh nhóm sản phẩm chủ lực hoặc tiêu chuẩn phổ
+biến trong ngành sản xuất GPU.
+
+Ở hai đầu của phân phối, các giá trị dưới 500 MHz và trên 2000 MHz xuất
+hiện rất ít, biểu thị đây là các trường hợp hiếm. Điều này có thể liên
+quan đến các GPU cũ có hiệu năng thấp hoặc các GPU cao cấp dành cho
+những ứng dụng đặc thù.
+
+Phân phối không đồng đều này cho thấy sự đa dạng về hiệu năng của các
+GPU trong tập dữ liệu. Tuy nhiên, sự tập trung mạnh ở một số khoảng giá
+trị gợi ý rằng một vài dòng sản phẩm chiếm ưu thế lớn trên thị trường.
+Để hiểu rõ hơn về các đặc điểm chi tiết, việc điều chỉnh binwidth hoặc
+phân tích các thông số kỹ thuật tương ứng có thể hữu ích. Ngoài ra, cần
+kiểm tra các giá trị bất thường ở hai đầu phân phối để loại bỏ khả năng
+dữ liệu lỗi hoặc ngoại lệ không hợp lý.
+
+**2.3. Vẽ đồ thị boxplot cho biến Memory_Speed theo Manufacturer,
+Dedicated, MemoryType.**
+
+```{r}
+# Vẽ boxplot cho Memory_Bandwidth theo Manufacturer
+ggplot(GPU_data, aes(x = Manufacturer, y = Memory_Speed)) +
+  geom_boxplot(fill = "steelblue", color = "black", alpha = 0.7) +  # Thay đổi màu sắc và độ trong suốt của hộp
+  labs(
+       x = "Nhà sản xuất (Manufacturer)",
+       y = "Memory Speed (MHz)",
+       caption = paste("Hình 2 -  Đồ thị Boxplot của Memory Speed theo Nhà sản xuất (Manufacturer)")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.caption = element_text(hjust = 0.5, face = "italic", color = "darkred")
+        )  # Xoay nhãn trục x để dễ đọc hơn
+```
+
+Dựa trên đồ thị, nhóm rút ra một số nhận xét về sự phân bố Memory Speed
+của GPU được phân loại theo nhà sản xuất, bao gồm AMD, ATI, Intel, và
+Nvidia: Các nhà sản xuất như AMD và Nvidia có phạm vi phân bố rộng, thể
+hiện danh mục sản phẩm đa dạng từ tầm thấp đến cao cấp. ATI tập trung
+vào các sản phẩm cao cấp với Memory Speed vượt trội. Intel có phân khúc
+rõ ràng ở nhóm hiệu năng thấp, phù hợp với GPU tích hợp.
+
+```{r}
+# Vẽ boxplot cho Memory_Bandwidth theo Dedicated
+ggplot(GPU_data, aes(x = Dedicated, y = Memory_Speed)) +
+  geom_boxplot(fill = "steelblue", color = "black", alpha = 0.7) +  # Thay đổi màu sắc và độ trong suốt của hộp
+  labs(
+       x = "Dedicated GPU",
+       y = "Memory Speed (MHz)",
+        caption = paste( "Hình 3 - Đồ thị Boxplot của Memory Speed theo Dedicated GPU")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5),
+        plot.caption = element_text(hjust = 0.5, face = "italic", color = "darkred")
+        )  # Điều chỉnh vị trí nhãn trục x
+```
+
+Nhóm rút ra một số nhận xét về đồ thị boxplot "Memory Speed theo
+Dedicated GPU":
+
+Non-Dedicated GPU (No): Phân bố Memory Speed của nhóm này rất hẹp, với
+giá trị chủ yếu nằm trong khoảng 1000 MHz. Điều này cho thấy GPU tích
+hợp có tốc độ bộ nhớ thấp và đồng nhất hơn, phù hợp với vai trò hỗ trợ
+cơ bản thay vì xử lý đồ họa chuyên sâu.
+
+Dedicated GPU (Yes): Phân bố Memory Speed rộng hơn đáng kể, từ khoảng
+500 MHz đến hơn 2000 MHz. Trung vị nằm ở mức 1500 MHz, cao hơn nhóm
+Non-Dedicated GPU, cho thấy GPU rời thường có hiệu năng cao hơn. Khoảng
+giá trị rộng thể hiện sự đa dạng trong phân khúc sản phẩm, từ các GPU
+tầm trung đến cao cấp.
+
+GPU rời (Dedicated GPU) có tốc độ bộ nhớ cao hơn đáng kể so với GPU tích
+hợp, phù hợp với các nhu cầu xử lý đồ họa phức tạp và chuyên nghiệp. GPU
+tích hợp (Non-Dedicated GPU) có hiệu năng thấp hơn và ít biến động, phù
+hợp với các ứng dụng cơ bản như văn phòng, xem phim, hoặc chơi game nhẹ.
+
+```{r}
+# Vẽ boxplot cho Memory_Bandwidth theo Shader
+ggplot(GPU_data, aes(x = Memory_Type, y = Memory_Speed)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7) +  # Thay đổi màu sắc và độ trong suốt
+  labs(
+       x = "Memory Type",
+       y = "Memory Speed (MHz)",
+       caption = "Hình 4 - Đồ thị Boxplot của Memory Speed theo Memory Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.caption = element_text(hjust = 0.5, face = "italic", color = "darkred")
+        )  # Xoay nhãn trục x
+```
+
+Dựa trên biểu đồ boxplot về Memory Speed (MHz) theo Memory Type, nhóm
+rút ra các nhận xét sau:
+
+1.  Xu hướng tăng tốc độ theo thời gian: Các loại bộ nhớ đời sau (GDDR5,
+    GDDR5X, HBM-1, HBM-2) có tốc độ cao hơn đáng kể so với các loại đời
+    cũ (DDR, DDR2, DDR3). Điều này phản ánh sự tiến bộ trong công nghệ
+    bộ nhớ.
+
+2.  Phân tán dữ liệu: DDR, DDR2, DDR3: Có tốc độ thấp, dao động trong
+    khoảng từ 500 MHz đến dưới 1000 MHz, với mức phân tán tương đối
+    nhỏ.GDDR4, GDDR5: Có sự phân tán lớn hơn, đặc biệt GDDR5 với tốc độ
+    trải dài từ khoảng 1000 MHz đến hơn 2000 MHz. GDDR5X: Tốc độ tập
+    trung hơn ở mức cao, thể hiện hiệu suất ổn định.
+
+3.  Ngoại lệ: Một số điểm dữ liệu ngoài hộp (outliers) xuất hiện ở các
+    nhóm DDR2, DDR3, GDDR5, có thể đại diện cho các sản phẩm tối ưu hoặc
+    không tiêu chuẩn.
+
+4.  Bộ nhớ HBM (High Bandwidth Memory): HBM-1 và HBM-2 có tốc độ thấp
+    hơn nhiều so với GDDR5X, nhưng HBM thường được tối ưu cho băng thông
+    thay vì chỉ số MHz, vì vậy điều này không phản ánh trực tiếp hiệu
+    năng.
+
+Công nghệ bộ nhớ đã có sự cải tiến đáng kể theo thời gian, với tốc độ
+ngày càng cao ở các thế hệ mới. GDDR5 và GDDR5X hiện tại có ưu thế lớn
+về hiệu suất. Tuy nhiên, đặc điểm của từng loại bộ nhớ còn phụ thuộc vào
+mục tiêu sử dụng (băng thông, hiệu suất, hay tiết kiệm năng lượng).
+
+**2.4. Vẽ biểu đồ tương quan giữa các biến:**
+
+```{r}
+# Tính ma trận tương quan
+cor_matrix <- cor(GPU_data[, sapply(GPU_data, is.numeric)], use = "complete.obs")
+# Vẽ biểu đồ tương quan
+p <- corrplot(cor_matrix, method = "circle", type = "full", order = "hclust", 
+              addCoef.col = "black", tl.col = "black", tl.srt = 60, 
+              number.cex = 0.7, mar = c(0,0,0.5,0))
+
+# Thêm tiêu đề dưới biểu đồ
+grid.text("Hình 5: Biểu đồ Tương Quan giữa các Biến", 
+          x = 0.5,  # Căn giữa theo chiều ngang
+          y = 0.001,  # Điều chỉnh vị trí chiều dọc, âm để xuống dưới
+          gp = gpar(fontsize = 12, fontface = "italic", col = "darkred"))
+```
+
+Dựa trên kết quả từ ma trận tương quan, ta có thể đưa ra nhận xét về mối
+quan hệ giữa Memory_Speed và các biến khác:
+
+Memory_Speed và Memory: Có mối tương quan dương trung bình với tương
+quan = 0.49. Điều này cho thấy rằng tốc độ bộ nhớ có sự phụ thuộc đáng
+kể vào dung lượng bộ nhớ. Điều này có nghĩa là khi dung lượng bộ nhớ
+tăng lên, tốc độ bộ nhớ cũng có thể tăng, và sự thay đổi này có thể được
+phản ánh trong các mô hình học máy hoặc phân tích dữ liệu.
+
+Memory_Speed và Memory_Bandwidth: Mối quan hệ giữa băng thông bộ nhớ và
+tốc độ bộ nhớ là rất quan trọng, vì tốc độ bộ nhớ và băng thông có liên
+quan mật thiết trong việc xử lý dữ liệu. Memory_Bandwidth có thể là yếu
+tố quan trọng ảnh hưởng đến Memory_Speed.
+
+Memory_Speed và Memory_Bus: Có mối tương quan rất yếu với tương quan =
+0.02. Điều này cho thấy rằng độ rộng bus bộ nhớ không có ảnh hưởng đáng
+kể đến tốc độ bộ nhớ.
+
+Memory_Speed và L2_Cache: L2_Cache có thể ảnh hưởng đến tốc độ bộ nhớ,
+nhưng mối quan hệ này phụ thuộc vào nhiều yếu tố khác như kiến trúc và
+quy trình sản xuất. Nếu tương quan yếu hoặc không rõ ràng, có thể chỉ ra
+rằng bộ nhớ cache không phải yếu tố quyết định chính.
+
+Memory_Speed và Process:Mối quan hệ này có thể là nghịch, đặc biệt nếu
+quy trình sản xuất (Process) cũ hơn có thể làm giảm tốc độ bộ nhớ.
+
+**2.5.Vẽ đồ thị scatter plot cho biến Memory_Speed theo các biến
+“Memory_Bandwidth”, “L2_Cache”, “Memory_Bus”, " Process”, "Memory".**
+
+Để xác định xu hướng biến đổi cho tốc độ bộ nhớ theo các biến khác ta vẽ
+đồ thị phân tán:
+
+```{r}
+# Vẽ scatter plot cho Memory_Speed theo Memory_Bandwidth
+ggplot(GPU_data, aes(x = Memory_Bandwidth, y = Memory_Speed)) +
+  geom_point(color = "steelblue", alpha = 0.7) +  # Thay đổi màu sắc và độ trong suốt của điểm
+  labs(x = "Memory Bandwidth (GB/s)",
+       y = "Memory Speed (MHz)",
+       caption = "Hình 6 - Đồ thị Scatter Plot của Memory Speed theo Memory_Bandwidth") +
+  theme_minimal()+
+      theme(
+        plot.caption = element_text(hjust = 0.5, face = "italic", color = "darkred")
+      )
+```
+
+```{r}
+# Vẽ scatter plot cho Memory_Speed theo L2_Cache
+ggplot(GPU_data, aes(x = L2_Cache, y = Memory_Speed)) +
+  geom_point(color = "steelblue", alpha = 0.7) +  # Thay đổi màu sắc và độ trong suốt của điểm
+  labs(
+       x = "L2_Cache (KB)",
+       y = "Memory Speed (MHz)",
+       Caption = "Hình 7 - Đồ thị Scatter Plot của Memory Speed theo L2_Cache") +
+  theme_minimal()+
+      theme(
+        plot.caption = element_text(hjust = 0.5, face = "italic", color = "darkred")
+      )
+```
+
+```{r}
+ggplot(GPU_data, aes(x = Memory_Bus, y = Memory_Speed)) +
+  geom_point(color = "steelblue", alpha = 0.7) +  # Thay đổi màu sắc và độ trong suốt của điểm
+  labs(
+       x = "Memory_Bus(Bit)",
+       y = "Memory Speed (MHz)",
+       caption = "Hình 8 - Đồ thị Scatter Plot của Memory Speed theo Memory_Bus") +
+  theme_minimal()+
+      theme(
+        plot.caption = element_text(hjust = 0.5, face = "italic", color = "darkred")
+      )
+```
+
+```{r}
+ggplot(GPU_data, aes(x = Process, y = Memory_Speed)) +
+  geom_point(color = "steelblue", alpha = 0.7) +  # Thay đổi màu sắc và độ trong suốt của điểm
+  labs(
+       x = "Process (nm)",
+       y = "Memory Speed (MHz)",
+       caption = "Hình 9 - Đồ thị Scatter Plot của Memory Speed theo Process" ) +
+  theme_minimal()+
+      theme(
+        plot.caption = element_text(hjust = 0.5, face = "italic", color = "darkred")
+      )
+
+```
+
+```{r}
+ggplot(GPU_data, aes(x = Memory, y = Memory_Speed)) +
+  geom_point(color = "steelblue", alpha = 0.7) +  # Thay đổi màu sắc và độ trong suốt của điểm
+  labs(x = "Memory (MB)",
+       y = "Memory Speed (MHz)",
+       caption = "Hình 10 - Đồ thị Scatter Plot của Memory Speed theo Memory") +
+  theme_minimal()+
+      theme(
+        plot.caption = element_text(hjust = 0.5, face = "italic", color = "darkred")
+      )
+```
+
+Dựa trên biểu đồ phân tán của biến Memory Speed theo các biến
+“Memory_Bandwidth”, “L2_Cache”, “Memory_Bus”, “Process”, "Memory", nhóm
+rút ra một số nhận xét:
+
+Có một xu hướng chung chỉ ra rằng Memory Bandwidth cao hơn có liên quan
+đến Memory Speed cao hơn. Điều này có nghĩa là khi băng thông bộ nhớ
+tăng, tốc độ bộ nhớ cũng có xu hướng tăng.Có thể có một số giá trị ngoại
+lệ trong dữ liệu mà một số cấu hình bộ nhớ không tuân theo xu hướng
+chung. Việc xác định những giá trị này có thể cung cấp thông tin chi
+tiết về các trường hợp cụ thể mà hiệu suất bộ nhớ lệch khỏi chuẩn mực.
+
+Có ít điểm dữ liệu hơn cho kích thước bộ nhớ đệm L2 lớn hơn. Các điểm
+này phân tán nhiều hơn về tốc độ bộ nhớ, cho thấy khi kích thước bộ nhớ
+đệm L2 tăng lên, tốc độ bộ nhớ thay đổi rộng hơn. Mặc dù biểu đồ cho
+thấy sự phân phối chung, nhưng nó không chỉ ra mối tương quan rõ ràng
+hoặc mạnh giữa kích thước bộ nhớ đệm L2 và tốc độ bộ nhớ. Tuy nhiên, nó
+cho thấy tồn tại nhiều cấu hình khác nhau với kích thước bộ nhớ đệm và
+tốc độ bộ nhớ khác nhau.
+
+Mối quan hệ giữa tốc độ bộ nhớ và Bus bộ nhớ: Có một xu hướng chung cho
+thấy rằng các điểm dữ liệu tập trung ở các giá trị thấp của Memory Bus,
+tức là dưới 1000 Bits. Điều này cho thấy các hệ thống bộ nhớ có Bus bộ
+nhớ nhỏ hơn thường được sử dụng nhiều hơn.
+
+Mối quan hệ giữa tốc độ bộ nhớ và kích thước quy trình: Có một xu hướng
+chung cho thấy rằng khi kích thước quy trình giảm (tức là quá trình sản
+xuất càng tiên tiến), tốc độ bộ nhớ có xu hướng tăng. Điều này cho thấy
+các công nghệ sản xuất tiên tiến hơn có thể mang lại hiệu suất bộ nhớ
+cao hơn. Phân bố dữ liệu: Các điểm dữ liệu phân bố khá đều trên đồ thị,
+cho thấy sự đa dạng trong kích thước quy trình.
+
+Đối với phần lớn dữ liệu, Memory Speed (MHz) không có xu hướng tăng rõ
+rệt khi Memory (MB) tăng. Vì vậy tốc độ bộ nhớ (Memory Speed) không tỷ
+lệ thuận với dung lượng bộ nhớ (Memory). Một số điểm có Memory lớn vẫn
+duy trì Memory Speed tương đối thấp (dưới 1,000 MHz). Memory Speed phân
+tán mạnh ở mức Memory nhỏ (dưới 10,000 MB), trong khi ở mức Memory cao,
+sự phân tán giảm và ít điểm dữ liệu hơn.
+
+**2.3. Xử lý số liệu kỹ hơn**
+
+Nếu xử lý theo hướng xóa đi như ở Mục 1 ta sẽ gặp phải tình trạng mất dữ
+liệu khá nhiều vì nếu xóa ta chỉ còn 2637 records so với ban đầu là 3046
+records nghĩa là ta đã mất đi gần 14% lượng dữ liệu. Điều này có thể dẫn
+đến việc Thống kê suy diễn thiếu chính xác cũng như lượng mất đi sẽ rất
+lãng phí. Vì thế nhóm chúng em đi đến quyết định dựa vào những nhận định
+trong phần Thống kê mô tả để có thể xử lý lượng dữ liệu bị khuyết, tránh
+mất mác. Đầu tiên ta sẽ xử lý sơ dữ liệu thô như mục trên đã làm.
+
+```{r}
+processed_cols <-c ("Memory_Speed","Memory","Memory_Bandwidth","Memory_Type","Memory_Bus","L2_Cache","Architecture","Process","Dedicated","Manufacturer")
+processed_data <- All_GPUs[, processed_cols, drop = FALSE]
+
+processed_data[columns_to_clean] <- lapply(processed_data[columns_to_clean], remove_units)
+
+head(processed_data, 5)
+```
+
+```{r}
+
+show_na_result <- function() {
+  # Sử dụng hàm freq.na() để tìm tần suất NA trong dữ liệu 
+  na_summary_processed <- freq.na(processed_data) 
+  # Chuyển kết quả thành một data frame 
+  na_summary_processed_df <- as.data.frame(na_summary_processed) 
+  colnames(na_summary_processed_df) <- c("NA_Count", "NA_Percentage")
+  kable(na_summary_processed_df, format = "markdown", caption = "Số lượng và tỉ lệ dữ liệu khuyết ở các biến")
+}
+
+show_na_result()
+
+```
+
+***2.3.1. Xử lý biến Dedicated***
+
+Khi quan sát dữ liệu ta sẽ thấy sự liên quan giữa Manufacturer và
+Dedicated vì thế ta sẽ tiến hành vẽ đồ thị tấn suất của 2 biến.
+
+```{r}
+# Bảng tần suất
+freq_table <- table(processed_data$Manufacturer, processed_data$Dedicated)
+head(freq_table)
+# Biểu đồ
+freq_df <- as.data.frame(freq_table)
+colnames(freq_df) <- c("Manufacturer", "Dedicated", "Freq")
+
+# Vẽ biểu đồ cột đôi
+ggplot(freq_df, aes(x = Manufacturer, y = Freq, fill = Dedicated)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Biểu đồ cột đôi giữa Manufacturer và Dedicated",
+       x = "Manufacturer",
+       y = "Tần suất") +
+  scale_fill_manual(values = c("skyblue", "orange")) +
+  theme_minimal()
+```
+
+Dựa vào biểu đồ trên ta nhận định rằng: - Nếu Manufacturer là AMD, ATI,
+Nvidia thì Delicated sẽ là Yes - Nếu Manufacturer là Intel thì Delicated
+sẽ là No Dựa vào nhận định trên ta sẽ tiến hành thay thế các dữ liệu na
+ở cột Delicated
+
+```{r}
+
+processed_data$Dedicated[is.na(processed_data$Dedicated) & processed_data$Manufacturer %in% c("AMD", "ATI", "Nvidia")] <- "Yes"
+processed_data$Dedicated[is.na(processed_data$Dedicated) & processed_data$Manufacturer == "Intel"] <- "No"
+show_na_result()
+```
+
+***2.3.2. Xử lý biến Memory_Type***
+
+Ta nhận thấy rằng phần lớn bộ Memory_Type là DDR2 và DDR đều có L2_Cache
+= 0. SỐ lượng biến DDR và DDR2 cũng không chiếm qua nhiều (47 trong tổng
+số 3046) vì thế ta sẽ tiến hành gọp 2 biến đó thành một biến duy nhất là
+DDR1. Từ đây ta có thể nhận định rằng nếu L2_Cache = 0 thì Memory_Type
+sẽ là DDR1
+
+```{r}
+processed_data$Memory_Type <- replace(processed_data$Memory_Type, processed_data$Memory_Type == "DDR" | processed_data$Memory_Type == "DDR2", "DDR1")
+
+processed_data$Memory_Type[is.na(processed_data$Memory_Type) & processed_data$L2_Cache == 0] <- "DDR1"
+table(processed_data$Memory_Type)
+
+```
+
+Ta nhận thấy rằng ngoài các loại có nhiều dữ liệu thì eDRAM, GDDR2,
+GDDR4, HBM-1 và HBM-2 có rất ít dữ liệu và chỉ còn khoản 10 records là
+còn na. Từ đây ta sẽ gọp các dữ liệu có ít và dữ liệu na thành một loại
+dữ liệu mới là Other.
+
+```{r}
+processed_data$Memory_Type <- replace(processed_data$Memory_Type, processed_data$Memory_Type == "eDRAM" | processed_data$Memory_Type == "GDDR2" | processed_data$Memory_Type == "GDDR4" | processed_data$Memory_Type == "HBM-1" | processed_data$Memory_Type == "HBM-2" | is.na(processed_data$Memory_Type), "Other")
+
+table(processed_data$Memory_Type)
+
+show_na_result()
+```
+
+***2.3.3. Xử lý biến Architecture***
+
+Ở đây ta nhận thấy tên kiến trúc thường bắt đầu giống nhau và chỉ khác ở
+hậu tố ví dụ "Kepler GK107" và "Kepler GK104" vì thế ta sẽ tiến hành xóa
+đi hậu tố chỉ giữ lại tiền tố.
+
+```{r}
+processed_data$Architecture <- sapply(strsplit(processed_data$Architecture, " "), `[`, 1)
+table(processed_data$Architecture)
+```
+
+Sau khi xóa đi hậu tố ta nhận thấy có rất nhiều kiến trúc chỉ có 1 từ và
+hậu tố được đính kèm theo ví dụ như RV380, RV410, ta sẽ tiến hành xử lý
+bằng cách xóa đi hậu tố và chỉ giữ lại chữ cái đầu tiên. Một số kiến
+trúc bắt đầu bằng 'R' cũng có rất nhiều records nên ta sẽ chỉ thay thế
+các kiến trúc có tần số bé hơn 10.
+
+```{r}
+freq_table <- table(processed_data$Architecture)
+processed_data$Architecture <- sapply(processed_data$Architecture, function(x) {
+  if (grepl("^R", x) && freq_table[x] < 10) {
+    return("R")
+  } else {
+    return(x)
+  }
+})
+
+# Kết quả
+table(processed_data$Architecture)
+```
+
+Tiếp đến ta sẽ xử lý cụm kiến trúc bắt đầu bằng ký tự 'G', ở đây có các
+kiến trúc bắt đầu bằng 'G' nhưng có rất nhiều records nên ta sẽ chỉ
+chuyển đổi các records có tần số bé hơn 10.
+
+```{r}
+freq_table <- table(processed_data$Architecture)
+processed_data$Architecture <- sapply(processed_data$Architecture, function(x) {
+  if (grepl("^G", x) && freq_table[x] < 10) {
+    return("G")
+  } else {
+    return(x)
+  }
+})
+
+# Kết quả
+table(processed_data$Architecture)
+
+```
+
+Ta sẽ tiến hành xử lý các kiến trúc còn lại như trên.
+
+```{r}
+freq_table <- table(processed_data$Architecture)
+processed_data$Architecture <- sapply(processed_data$Architecture, function(x) {
+  if (grepl("^M", x) && freq_table[x] < 10) {
+    return("M")
+  } else {
+    return(x)
+  }
+})
+
+processed_data$Architecture <- sapply(processed_data$Architecture, function(x) {
+  if (grepl("^N", x) && freq_table[x] < 10) {
+    return("N")
+  } else {
+    return(x)
+  }
+})
+
+
+# Kết quả
+table(processed_data$Architecture)
+```
+
+Tới đây cột dữ liệu về Architecture đã khá đẹp, ta sẽ tiến hành xử lý
+tới các giá trị na. Ta nhận thấy các giá trị na của cột Architecture đều
+có L2_Cache = 0 và dựa vào Manufacturer ta sẽ có nhận định như sau: -
+Nếu Manufacturer là Intel: Arrandale - Nếu Manufacturer là AMD:
+Evergreen - Nếu Manufacturer là Nvidia: G
+
+Sau khi đã xử lý các giá trị na ta sẽ đổi các giá trị có tần số thấp
+thành "Other"
+
+```{r}
+processed_data$Architecture <- replace(processed_data$Architecture, processed_data$Manufacturer == "Intel" & is.na(processed_data$Architecture), "Arrandale")
+processed_data$Architecture <- replace(processed_data$Architecture, processed_data$Manufacturer == "AMD" & is.na(processed_data$Architecture), "Evergreen")
+processed_data$Architecture <- replace(processed_data$Architecture, processed_data$Manufacturer == "Nvidia" & is.na(processed_data$Architecture), "G")
+
+freq_table <- table(processed_data$Architecture)
+
+processed_data$Architecture <- sapply(processed_data$Architecture, function(x) {
+  freq_count <- ifelse(is.na(freq_table[x]), 0, freq_table[x])
+  
+  # Thay thế nếu tần suất nhỏ hơn 10
+  if (freq_count < 10) {
+    return("Other")
+  } else {
+    return(x)
+  }
+})
+
+  
+table(processed_data$Architecture)
+show_na_result()
+
+```
+
+***2.3.3. Xử lý biến Memory_Bus và Memory_Speed***
+
+Ta nhận thấy rằng Memory Bus phụ thuộc vào Architecture vì thế ta sẽ lấy
+giá trị trung bình Memory Bus của Architecture để thay thế cho giá trị
+na. Nghĩa là ta sẽ lấy mean của Architecture A để thay vào Memory Bus
+đang có giá trị na và có Architecture là A.
+
+Tương tự như Memory Bus ta cũng sẽ tính toán Memory Speed thông qua
+trung bình của Memory_Type.
+
+```{r}
+replace_na_with_group_mean <- function(data, group_col, target_col) {
+  # Tính toán giá trị trung bình cho từng nhóm trong cột Architecture
+  group_means <- tapply(data[[target_col]], data[[group_col]], mean, na.rm = TRUE)
+  
+  # Thay thế các giá trị NA trong target_col với giá trị trung bình của từng group
+  data[[target_col]] <- mapply(function(x, group) {
+    if (is.na(x)) {
+      return(round(group_means[group], digits=0))
+    } else {
+      return(x)
+    }
+  }, data[[target_col]], data[[group_col]])
+  
+  return(data)
+}
+
+processed_data <- replace_na_with_group_mean(processed_data, "Architecture", "Memory_Bus")
+
+processed_data <- replace_na_with_group_mean(processed_data, "Memory_Type", "Memory_Speed")
+
+show_na_result()
+
+```
+
+***2.3.3. Xử lý biến Memory_Bandwidth***
+
+Biểu đồ hộp (Boxplot) để xem phân phối giữa Memory_Bandwidth và
+Memory_Type.
+
+```{r}
+ggplot(processed_data, aes(x = Memory_Type, y = Memory_Bandwidth)) +
+  geom_boxplot(fill = "lightgreen", color = "darkgreen", na.rm = TRUE) +
+  theme_minimal() +
+  labs(title = "Distribution of Memory Bandwidth by Memory Type", x = "Memory Type", y = "Memory Bandwidth")
+```
+
+Dựa vào đây ta có thể nhận xét rằng giá trị giá trị của Memory Bandwith
+có thể biểu diễn cơ bản qua Memory Type nhưng ta sẽ bỏ qua các giá trị
+ngoại lai (outlier).
+
+```{r}
+replace_na_with_mean_no_outliers <- function(data, group_col, target_col) {
+  # Loại bỏ giá trị ngoại lai bằng cách sử dụng IQR
+  remove_outliers <- function(x) {
+    Q1 <- quantile(x, 0.25, na.rm = TRUE)
+    Q3 <- quantile(x, 0.75, na.rm = TRUE)
+    IQR_value <- Q3 - Q1
+    lower_bound <- Q1 - 1.5 * IQR_value
+    upper_bound <- Q3 + 1.5 * IQR_value
+    x[x < lower_bound | x > upper_bound] <- NA
+    return(x)
+  }
+  
+  # Áp dụng hàm loại bỏ ngoại lai theo từng nhóm
+  data[[target_col]] <- ave(data[[target_col]], data[[group_col]], FUN = function(x) remove_outliers(x))
+  
+  # Tính toán giá trị trung bình của từng nhóm sau khi loại bỏ ngoại lai
+  group_means <- tapply(data[[target_col]], data[[group_col]], mean, na.rm = TRUE)
+  
+  # Thay thế các giá trị NA trong target_col với giá trị trung bình của từng group
+  data[[target_col]] <- mapply(function(x, group) {
+    if (is.na(x)) {
+      return(round(group_means[group], digits = 0))
+    } else {
+      return(x)
+    }
+  }, data[[target_col]], data[[group_col]])
+  
+  return(data)
+}
+
+# Áp dụng hàm để thay thế NA trong Memory_Bus và bỏ qua ngoại lai
+processed_data <- replace_na_with_mean_no_outliers(processed_data, "Memory_Type", "Memory_Bandwidth")
+
+# Kiểm tra kết quả
+show_na_result()
+
+```
+
+***2.3.4. Xử lý biến Memory***
+
+Thay vì xử lý trên các biến khác thay thế bằng giá trị trung bình, ở
+biến Memory ta nhận thấy các giá trị memory tuân theo một số con số nhất
+định 128, 256, 512, ... Vì thế ở biến Memory ta sẽ thay thế bằng giá trị
+xuất hiện nhiều nhất ở Memory_Type tương ứng. Nhưng điều đặc biệt ở đây
+là toàn bộ nhóm Memory_Type là DDR4 đều không có dữ liệu Memory nên ta
+sẽ không thể tính toán Memory thông qua Memory_Type như chiến lược trên
+được. Tuy nhiên ta nhận thấy toàn bộ nhóm này đều có Memory_Bandwidth là
+34.1 vì thế ta sẽ sử dụng giá trị mode của Memory_Bandwidth = 34.1 ứng
+với cột Memory để thay thế.
+
+```{r}
+  calculate_mode <- function(x) {
+    x <- na.omit(x)  # Bỏ qua NA
+    if (length(x) == 0) return(NA)
+    unique_x <- unique(x)
+    freq <- table(x)
+    mode_value <- unique_x[which.max(freq)]
+    return(mode_value)
+  }
+
+replace_na_with_mode_by_group <- function(data, target_col, group_col) {
+
+  
+  group_modes <- tapply(data[[target_col]], data[[group_col]], calculate_mode)
+  
+  data[[target_col]] <- mapply(function(memory, type) {
+    if (is.na(memory)) {
+      return(group_modes[[type]]) 
+    } else {
+      return(memory) 
+    }
+  }, data[[target_col]], data[[group_col]])
+  
+  return(data)
+}
+
+processed_data <- replace_na_with_mode_by_group(processed_data, "Memory", "Memory_Type")
+
+
+replace_na_with_mode_for_specific_type <- function(data, target_col, group_col, group_value) {
+  subset_data <- data[data[[group_col]] == group_value, target_col]
+  
+  mode_value <- calculate_mode(subset_data)
+  
+  data[[target_col]] <- ifelse(
+    is.na(data[[target_col]]) & data[[group_col]] == group_value,
+    mode_value,
+    data[[target_col]]
+  )
+  
+  return(data)
+}
+
+processed_data <- replace_na_with_mode_for_specific_type(processed_data, "Memory", "Memory_Bandwidth", 34.1)
+
+
+
+# Kiểm tra kết quả
+show_na_result()
+
+```
+
+***2.3.5. Xử lý biến Process***
+
+Tương tự như xử lý biến Memory, ta nhận thấy Process và Architecture có
+một mối liên hệ nào đó vì thế ta sẽ thay thế giá trị na của Process bằng
+mode của Architecture tương ứng. Tuy nhiên sẽ có một số giá trị vẫn chưa
+thể thay thế được tương tự như Memory ta cũng phải một thêm một giá trị
+khác nữa để có thể thay thế giá trị na. Ở đây ta cũng sử dụng biến
+Memory_bandwidth bởi khi nhìn sang cột Memory_bandwidth ta sẽ thấy một
+số giá trị nhất định: 6.4, 7.0, 8.5, 10.7, 12.8, 17.1.
+
+```{r}
+processed_data <- replace_na_with_mode_by_group(processed_data, "Process", "Architecture")
+
+bandwidth_values <- c(6.4, 7.0, 8.5, 10.7, 12.8, 17.1)
+
+for (value in bandwidth_values) {
+  processed_data <- replace_na_with_mode_for_specific_type(processed_data, "Process", "Memory_Bandwidth", value)
+}
+
+
+show_na_result()
+
+```
+
+**2.4. So sánh với dữ liệu vừa thu được với dữ liệu chỉ được xử lý sơ**
+
+```{r}
+ggplot(processed_data, aes(x = Memory_Bandwidth, y = Memory_Speed)) +
+  geom_point(color = "steelblue", alpha = 0.7) +  
+  labs(
+       x = "Memory_Bandwidth (GB/s)",
+       y = "Memory Speed (MHz)",
+       Caption = "Đồ thị Scatter Plot của Memory Speed theo Memory_Bandwidth") +
+  theme_minimal()+
+      theme(
+        plot.caption = element_text(hjust = 0.5, face = "italic", color = "darkred")
+      )
+
+ggplot(processed_data, aes(x = L2_Cache, y = Memory_Speed)) +
+  geom_point(color = "steelblue", alpha = 0.7) + 
+  labs(
+       x = "L2_Cache (KB)",
+       y = "Memory Speed (MHz)",
+       Caption = "Đồ thị Scatter Plot của Memory Speed theo L2_Cache") +
+  theme_minimal()+
+      theme(
+        plot.caption = element_text(hjust = 0.5, face = "italic", color = "darkred")
+      )
+
+ggplot(processed_data, aes(x = Memory_Type, y = Memory_Speed)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7) +  
+  labs(
+       x = "Memory Type",
+       y = "Memory Speed (MHz)",
+       caption = "Đồ thị Boxplot của Memory Speed theo Memory Type") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.caption = element_text(hjust = 0.5, face = "italic", color = "darkred")
+        ) 
+```
+
+<font size="4">**3.THỐNG KÊ SUY DIỄN**</font> Q-Q plot:
+
+```{r}
+AMD_data <- subset(processed_data ,processed_data$Manufacturer == "AMD")
+qqnorm(AMD_data$Memory_Speed)
+qqline(AMD_data$Memory_Speed)
+
+Nvidia_data <- subset(processed_data ,processed_data$Manufacturer == "Nvidia")
+qqnorm(Nvidia_data$Memory_Speed)
+qqline(Nvidia_data$Memory_Speed)
+```
+
+```{r}
+shapiro.test(Nvidia_data$Memory_Speed)
+shapiro.test(Nvidia_data$Memory_Speed)
+
+```
+
+Tinh đặc trưng mẫu: AMD
+
+```{r}
+n<-length(AMD_data$Memory_Speed)
+xtb<-mean(AMD_data$Memory_Speed)
+s<-sd(AMD_data$Memory_Speed)
+
+z_critical <- qnorm(p=1-0.05/2,lower.tail=TRUE)
+Epsilon <- qnorm(p=1-0.05/2)*s/sqrt(n)
+Left_CI <- xtb-Epsilon
+Right_CI <- xtb+Epsilon
+data.frame(n,xtb,s,z_critical,Epsilon,Left_CI,Right_CI)
+```
+
+Nvidia
+
+```{r}
+n<-length(Nvidia_data$Memory_Speed)
+xtb<-mean(Nvidia_data$Memory_Speed)
+s<-sd(Nvidia_data$Memory_Speed)
+
+z_critical <- qnorm(p=1-0.05/2,lower.tail=TRUE)
+Epsilon <- qnorm(p=1-0.05/2)*s/sqrt(n)
+Left_CI <- xtb-Epsilon
+Right_CI <- xtb+Epsilon
+data.frame(n,xtb,s,z_critical,Epsilon,Left_CI,Right_CI)
+```
+
+Kiểm định 2 mẫu:
+
+```{r}
+var.test(AMD_data$Memory_Speed, Nvidia_data$Memory_Speed,alternative="greater")
+```
+
+```{r}
+t.test(AMD_data$Memory_Speed, Nvidia_data$Memory_Speed,
+var.equal=T)
+```
+
+```{r}
+one_linear_model <- lm(Memory_Speed ~ Process, data = processed_data)
+
+summary(one_linear_model)
+
+par(mfrow = c(2, 2))  
+plot(one_linear_model)
+
+```
+
+```{r}
+multiple_linear_model <- lm(Memory_Speed ~ Memory + Memory_Bandwidth + Memory_Type + Memory_Bus + L2_Cache + Architecture + Process + Dedicated + Manufacturer, data = processed_data)
+
+summary(multiple_linear_model)
+
+par(mfrow = c(2, 2))  
+plot(multiple_linear_model)
+
+```
